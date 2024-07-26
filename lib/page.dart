@@ -1,6 +1,29 @@
+import 'package:device_preview/device_preview.dart';
 import 'package:flutter/material.dart';
 
 import 'product.dart';
+
+Future<void> main() async {
+  runApp(DevicePreview(
+    enabled: true,
+    builder: (context) => const App(),
+  ));
+}
+
+class App extends StatelessWidget {
+  const App({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      locale: DevicePreview.locale(context),
+      builder: DevicePreview.appBuilder,
+      title: 'Device Preview Example',
+      theme: ThemeData(primarySwatch: Colors.blue),
+      home: const ShopPage(),
+    );
+  }
+}
 
 class ShopPage extends StatefulWidget {
   const ShopPage({super.key});
@@ -24,33 +47,27 @@ class _ShopPageState extends State<ShopPage> with TickerProviderStateMixin {
   final Map<Product, GlobalKey> _cartItemKeys = {};
   final GlobalKey<AnimatedListState> _listKey = GlobalKey<AnimatedListState>();
   final ScrollController _scrollController = ScrollController();
-  late AnimationController _controller;
-  late Animation<Offset> _offsetAnimation;
-  late Animation<double> _sizeAnimation;
-  OverlayEntry? _overlayEntry;
+  final List<OverlayEntry> _overlayEntries = [];
+  final List<AnimationController> _controllers = [];
+  final Set<Product> _animatingItems = {};
   Offset _imageOffset = Offset.zero;
   Offset _targetOffset = Offset.zero;
-  bool _isAnimating = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 300));
-  }
 
   @override
   void dispose() {
-    _controller.dispose();
+    for (var controller in _controllers) {
+      controller.dispose();
+    }
     super.dispose();
   }
 
-  Future<void> _scrollToItem(GlobalKey key, int index) async {
+  Future<void> _scrollToItem(GlobalKey key) async {
     final context = key.currentContext;
     if (context != null) {
       await Scrollable.ensureVisible(
         context,
         curve: Curves.fastOutSlowIn,
-        duration: const Duration(seconds: 1),
+        duration: const Duration(milliseconds: 300),
         alignment: 0.5,
         alignmentPolicy: ScrollPositionAlignmentPolicy.explicit,
       );
@@ -58,7 +75,7 @@ class _ShopPageState extends State<ShopPage> with TickerProviderStateMixin {
   }
 
   Future<void> _addToCart(Product product) async {
-    if (_isAnimating) return;
+    if (_animatingItems.contains(product)) return;
 
     final productContext = product.key.currentContext;
     final cartContext = _cartKey.currentContext;
@@ -75,16 +92,20 @@ class _ShopPageState extends State<ShopPage> with TickerProviderStateMixin {
         var cartItem = _cartItemKeys[product]!;
 
         if (cartItem.currentContext == null) {
-          print('cartItem.currentContext == null');
-          setState(() {});
+          // Aproximar o scroll até a posição do item
+          final itemIndex = _cartItems.indexOf(product);
+          final targetPosition = (itemIndex * 50.0).clamp(0.0, _scrollController.position.maxScrollExtent);
+          await _scrollController.animateTo(
+            targetPosition,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+          );
+          cartItem = _cartItemKeys[product]!;
+          print('cartItem: $cartItem');
         }
 
-        cartItem = _cartItemKeys[product]!;
+        await _scrollToItem(cartItem);
 
-        await _scrollToItem(cartItem, _cartItems.indexOf(product));
-        // _scrollToItem(_cartItemKeys[product]!, _cartItems.indexOf(product));
-
-        // Atualizar _targetOffset após o scroll
         _targetOffset = (cartItem.currentContext?.findRenderObject() as RenderBox?)
                 ?.localToGlobal(Offset.zero, ancestor: deviceFrameRenderBox) ??
             _targetOffset;
@@ -92,73 +113,60 @@ class _ShopPageState extends State<ShopPage> with TickerProviderStateMixin {
         _animateItemToCart(product, productRenderBox);
       } else {
         _scrollController.animateTo(0, duration: const Duration(milliseconds: 300), curve: Curves.easeInOut);
-
         _targetOffset = cartRenderBox.localToGlobal(Offset.zero, ancestor: deviceFrameRenderBox);
         _animateItemToCart(product, productRenderBox);
+        _addItemToCart(product);
+        setState(() {});
       }
     }
   }
 
+  void _addItemToCart(Product product) {
+    final GlobalKey itemKey = GlobalKey();
+    _cartItemKeys[product] = itemKey;
+    _cartItems.insert(0, product);
+    _listKey.currentState?.insertItem(0);
+  }
+
   void _animateItemToCart(Product product, RenderBox productRenderBox) {
-    _isAnimating = true;
+    final controller = AnimationController(
+      duration: const Duration(milliseconds: 300),
+      vsync: this,
+    );
 
-    if (!_cartItems.contains(product)) {
-      final GlobalKey itemKey = GlobalKey();
-      _cartItemKeys[product] = itemKey;
-      _cartItems.insert(0, product); // Adicionar ao começo da lista
-      _listKey.currentState?.insertItem(0);
-    }
-
-    _controller.forward(from: 0);
-
-    _offsetAnimation = Tween<Offset>(
+    final offsetAnimation = Tween<Offset>(
       begin: _imageOffset,
       end: _targetOffset,
     ).animate(CurvedAnimation(
-      parent: _controller,
+      parent: controller,
       curve: Curves.easeInOut,
     ));
 
-    _sizeAnimation = Tween<double>(
+    final sizeAnimation = Tween<double>(
       begin: productRenderBox.size.width,
       end: 50,
     ).animate(CurvedAnimation(
-      parent: _controller,
+      parent: controller,
       curve: Curves.easeInOut,
-    ))
-      ..addStatusListener((status) {
-        if (status == AnimationStatus.completed) {
-          setState(() {
-            _isAnimating = false;
-          });
-          _overlayEntry?.remove();
-          _overlayEntry = null;
-        }
-      });
+    ));
 
-    _overlayEntry = _createOverlayEntry(productRenderBox.size);
-    Overlay.of(context).insert(_overlayEntry!);
-    // setState(() {});
-  }
-
-  OverlayEntry _createOverlayEntry(Size initialSize) {
-    return OverlayEntry(
+    final overlayEntry = OverlayEntry(
       builder: (context) => AnimatedBuilder(
-        animation: _offsetAnimation,
+        animation: offsetAnimation,
         builder: (context, child) {
           return Positioned(
-            left: _offsetAnimation.value.dx,
-            top: _offsetAnimation.value.dy,
+            left: offsetAnimation.value.dx,
+            top: offsetAnimation.value.dy,
             child: AnimatedBuilder(
-              animation: _sizeAnimation,
+              animation: sizeAnimation,
               builder: (context, child) {
                 return ClipRRect(
                   borderRadius: BorderRadius.circular(12.0),
                   child: Image.asset(
                     'assets/img.png',
                     fit: BoxFit.cover,
-                    width: _sizeAnimation.value,
-                    height: _sizeAnimation.value,
+                    width: sizeAnimation.value,
+                    height: sizeAnimation.value,
                   ),
                 );
               },
@@ -167,6 +175,27 @@ class _ShopPageState extends State<ShopPage> with TickerProviderStateMixin {
         },
       ),
     );
+
+    _overlayEntries.add(overlayEntry);
+    Overlay.of(context).insert(overlayEntry);
+    _controllers.add(controller);
+    _animatingItems.add(product);
+
+    sizeAnimation.addStatusListener((status) {
+      if (status == AnimationStatus.completed) {
+        final entryIndex = _overlayEntries.indexOf(overlayEntry);
+        if (entryIndex != -1) {
+          _overlayEntries[entryIndex].remove();
+          _overlayEntries.removeAt(entryIndex);
+        }
+        controller.dispose();
+        _controllers.remove(controller);
+        _animatingItems.remove(product);
+        setState(() {});
+      }
+    });
+
+    controller.forward();
   }
 
   @override
@@ -235,28 +264,26 @@ class _ShopPageState extends State<ShopPage> with TickerProviderStateMixin {
                       child: Container(
                         key: _cartKey,
                         child: AnimatedList(
-                          // physics: const ClampingScrollPhysics(),
                           key: _listKey,
                           controller: _scrollController,
                           scrollDirection: Axis.horizontal,
                           initialItemCount: _cartItems.length,
                           itemBuilder: (context, index, animation) {
                             final item = _cartItems[index];
-                            final originalIndex = _products
-                                .indexWhere((product) => product == item); // Encontrar o índice original do produto
+                            final originalIndex = _products.indexWhere((product) => product == item);
                             return Padding(
                               padding: const EdgeInsets.all(4.0),
                               child: SizeTransition(
                                 sizeFactor: animation,
                                 axis: Axis.horizontal,
-                                child: SizedBox(
-                                  width: 50,
-                                  height: 50,
-                                  child: Stack(
-                                    children: [
-                                      Opacity(
-                                        opacity: _isAnimating && index == 0 ? 0 : 1,
-                                        child: ClipRRect(
+                                child: Opacity(
+                                  opacity: _animatingItems.contains(item) ? 0 : 1,
+                                  child: SizedBox(
+                                    width: 50,
+                                    height: 50,
+                                    child: Stack(
+                                      children: [
+                                        ClipRRect(
                                           borderRadius: BorderRadius.circular(12.0),
                                           child: Image.asset(
                                             'assets/img.png',
@@ -266,26 +293,26 @@ class _ShopPageState extends State<ShopPage> with TickerProviderStateMixin {
                                             key: _cartItemKeys[item],
                                           ),
                                         ),
-                                      ),
-                                      Positioned(
-                                        top: 4.0,
-                                        left: 4.0,
-                                        child: Container(
-                                          padding: const EdgeInsets.all(2.0),
-                                          decoration: BoxDecoration(
-                                            color: Colors.black.withOpacity(0.5),
-                                            borderRadius: BorderRadius.circular(4.0),
-                                          ),
-                                          child: Text(
-                                            '$originalIndex',
-                                            style: const TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 12.0,
+                                        Positioned(
+                                          top: 4.0,
+                                          left: 4.0,
+                                          child: Container(
+                                            padding: const EdgeInsets.all(2.0),
+                                            decoration: BoxDecoration(
+                                              color: Colors.black.withOpacity(0.5),
+                                              borderRadius: BorderRadius.circular(4.0),
+                                            ),
+                                            child: Text(
+                                              '$originalIndex',
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 12.0,
+                                              ),
                                             ),
                                           ),
                                         ),
-                                      ),
-                                    ],
+                                      ],
+                                    ),
                                   ),
                                 ),
                               ),
