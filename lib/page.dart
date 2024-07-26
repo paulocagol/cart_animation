@@ -1,29 +1,6 @@
-import 'package:device_preview/device_preview.dart';
 import 'package:flutter/material.dart';
 
 import 'product.dart';
-
-Future<void> main() async {
-  runApp(DevicePreview(
-    enabled: true,
-    builder: (context) => const App(),
-  ));
-}
-
-class App extends StatelessWidget {
-  const App({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      locale: DevicePreview.locale(context),
-      builder: DevicePreview.appBuilder,
-      title: 'Device Preview Example',
-      theme: ThemeData(primarySwatch: Colors.blue),
-      home: const ShopPage(),
-    );
-  }
-}
 
 class ShopPage extends StatefulWidget {
   const ShopPage({super.key});
@@ -61,6 +38,7 @@ class _ShopPageState extends State<ShopPage> with TickerProviderStateMixin {
     super.dispose();
   }
 
+  /// Rola a lista do carrinho para tornar o item visível, se não estiver atualmente visível.
   Future<void> _scrollToItem(GlobalKey key) async {
     final context = key.currentContext;
     if (context != null) {
@@ -74,7 +52,9 @@ class _ShopPageState extends State<ShopPage> with TickerProviderStateMixin {
     }
   }
 
+  /// Adiciona um produto ao carrinho com animação.
   Future<void> _addToCart(Product product) async {
+    // Previne a adição do mesmo produto enquanto ele está animando.
     if (_animatingItems.contains(product)) return;
 
     final productContext = product.key.currentContext;
@@ -85,6 +65,7 @@ class _ShopPageState extends State<ShopPage> with TickerProviderStateMixin {
       RenderBox productRenderBox = productContext.findRenderObject() as RenderBox;
       final RenderBox deviceFrameRenderBox = deviceFrameContext.findRenderObject() as RenderBox;
 
+      // Calcula a posição da imagem do produto.
       _imageOffset = productRenderBox.localToGlobal(Offset.zero, ancestor: deviceFrameRenderBox);
       final RenderBox cartRenderBox = cartContext.findRenderObject() as RenderBox;
 
@@ -92,7 +73,7 @@ class _ShopPageState extends State<ShopPage> with TickerProviderStateMixin {
         var cartItem = _cartItemKeys[product]!;
 
         if (cartItem.currentContext == null) {
-          // Aproximar o scroll até a posição do item
+          // Aproxima o scroll até a posição do item
           final itemIndex = _cartItems.indexOf(product);
           final targetPosition = (itemIndex * 50.0).clamp(0.0, _scrollController.position.maxScrollExtent);
           await _scrollController.animateTo(
@@ -101,7 +82,6 @@ class _ShopPageState extends State<ShopPage> with TickerProviderStateMixin {
             curve: Curves.easeInOut,
           );
           cartItem = _cartItemKeys[product]!;
-          print('cartItem: $cartItem');
         }
 
         await _scrollToItem(cartItem);
@@ -112,6 +92,7 @@ class _ShopPageState extends State<ShopPage> with TickerProviderStateMixin {
 
         _animateItemToCart(product, productRenderBox);
       } else {
+        // Move o scroll para o início antes de adicionar o item ao carrinho.
         _scrollController.animateTo(0, duration: const Duration(milliseconds: 300), curve: Curves.easeInOut);
         _targetOffset = cartRenderBox.localToGlobal(Offset.zero, ancestor: deviceFrameRenderBox);
         _animateItemToCart(product, productRenderBox);
@@ -121,6 +102,7 @@ class _ShopPageState extends State<ShopPage> with TickerProviderStateMixin {
     }
   }
 
+  /// Adiciona o item à lista do carrinho.
   void _addItemToCart(Product product) {
     final GlobalKey itemKey = GlobalKey();
     _cartItemKeys[product] = itemKey;
@@ -128,6 +110,7 @@ class _ShopPageState extends State<ShopPage> with TickerProviderStateMixin {
     _listKey.currentState?.insertItem(0);
   }
 
+  /// Anima a adição do item ao carrinho.
   void _animateItemToCart(Product product, RenderBox productRenderBox) {
     final controller = AnimationController(
       duration: const Duration(milliseconds: 300),
@@ -207,6 +190,7 @@ class _ShopPageState extends State<ShopPage> with TickerProviderStateMixin {
       ),
       body: Stack(
         children: [
+          // Grade de produtos
           GridView.builder(
             padding: const EdgeInsets.all(8.0),
             gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
@@ -252,6 +236,7 @@ class _ShopPageState extends State<ShopPage> with TickerProviderStateMixin {
               );
             },
           ),
+          // Barra inferior do carrinho
           Align(
             alignment: Alignment.bottomCenter,
             child: BottomAppBar(
@@ -259,6 +244,7 @@ class _ShopPageState extends State<ShopPage> with TickerProviderStateMixin {
                 height: 100,
                 child: Stack(
                   children: [
+                    // Lista animada do carrinho
                     Align(
                       alignment: Alignment.centerLeft,
                       child: Container(
@@ -321,6 +307,7 @@ class _ShopPageState extends State<ShopPage> with TickerProviderStateMixin {
                         ),
                       ),
                     ),
+// Ícone do carrinho no canto direito
                     Positioned(
                       right: 0,
                       child: Padding(
